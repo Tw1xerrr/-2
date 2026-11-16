@@ -171,8 +171,10 @@ internal sealed class ChristmasOverlay : Form
     {
         base.OnPaint(e);
         var g = e.Graphics;
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        // Use hard-edged drawing for the overlay: its magenta color-key transparency
+        // can otherwise leave pink fringes around anti-aliased greenery and bulbs.
+        g.SmoothingMode = SmoothingMode.None;
+        g.PixelOffsetMode = PixelOffsetMode.None;
 
         if (showLights)
         {
@@ -220,6 +222,8 @@ internal sealed class ChristmasOverlay : Form
         using var needlesDark = new Pen(Color.FromArgb(225, 19, 72, 39), top ? 2.2f : 3.1f);
         using var needlesMid = new Pen(Color.FromArgb(220, 34, 105, 53), top ? 1.8f : 2.5f);
         using var needlesLight = new Pen(Color.FromArgb(155, 73, 133, 69), 1.0f);
+        using var branchSnow = new Pen(Color.FromArgb(255, 255, 255, 255), 1.25f);
+        using var snowDot = new SolidBrush(Color.White);
 
         using var path = new GraphicsPath();
         path.AddLines(Enumerable.Range(0, segments + 1).Select(PointAt).ToArray());
@@ -246,13 +250,19 @@ internal sealed class ChristmasOverlay : Form
                 g.DrawLine(needlesDark, sx, sy, ex, ey);
                 g.DrawLine(needlesMid, sx + 1, sy + direction * 1.5f, ex - 1, ey - direction);
                 g.DrawLine(needlesLight, sx + 1, sy + direction * 2.5f, ex - 2, ey - direction * 2);
+
+                // Crisp white snow resting on the upper edge of each fir sprig.
+                float snowY = Math.Min(sy, ey) + 2.5f;
+                g.DrawLine(branchSnow, sx + 1, snowY, ex - 2, snowY + direction * 1.5f);
+                if ((x / spacing + side + 4) % 3 == 0)
+                    g.FillEllipse(snowDot, ex - 1.5f, ey - 2.5f, 2.2f, 2.2f);
             }
         }
 
         // Small, warm bulbs spaced farther apart on the slimmer upper strand.
         Color[] colors = { Color.FromArgb(255, 224, 112, 82), Color.FromArgb(255, 245, 207, 111),
             Color.FromArgb(255, 131, 190, 218), Color.FromArgb(255, 159, 202, 132) };
-        int bulbSpacing = top ? 92 : 76;
+        int bulbSpacing = top ? 56 : 46;
         int index = 0;
         for (int x = top ? 42 : 28; x < width; x += bulbSpacing, index++)
         {
@@ -262,7 +272,7 @@ internal sealed class ChristmasOverlay : Form
             float drop = top ? 7f : -7f;
             float pulse = 0.82f + 0.18f * (float)Math.Sin(phase * 1.8f + index * 1.13f);
             Color color = colors[index % colors.Length];
-            float radius = top ? 2.25f : 2.8f;
+            float radius = top ? 2.5f : 3.0f;
 
             using var glow = new SolidBrush(Color.FromArgb((int)(34 * pulse), color));
             using var bulb = new SolidBrush(Color.FromArgb((int)(225 * pulse), color));

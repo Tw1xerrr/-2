@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace NovaChristmasDesktop;
@@ -21,6 +23,17 @@ internal sealed class ChristmasOverlay : Form
     private const int WS_EX_TRANSPARENT = 0x20;
     private const int WS_EX_TOOLWINDOW = 0x80;
     private const int WS_EX_LAYERED = 0x80000;
+    private const uint SWP_NOSIZE = 0x0001;
+    private const uint SWP_NOMOVE = 0x0002;
+    private const uint SWP_NOACTIVATE = 0x0010;
+    private const uint SWP_NOOWNERZORDER = 0x0200;
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr FindWindow(string? className, string? windowName);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
+        int x, int y, int cx, int cy, uint flags);
 
     private readonly System.Windows.Forms.Timer animation = new() { Interval = 30 };
     private readonly Random random = new();
@@ -29,6 +42,8 @@ internal sealed class ChristmasOverlay : Form
     private bool showSnow = true;
     private bool showLights = true;
     private float phase;
+
+    private const float CursorRepelRadius = 112f;
 
     private sealed class Flake
     {
@@ -46,7 +61,7 @@ internal sealed class ChristmasOverlay : Form
         TransparencyKey = Color.Magenta;
         DoubleBuffered = true;
 
-        for (int i = 0; i < 125; i++) snow.Add(NewFlake(true));
+        for (int i = 0; i < 165; i++) snow.Add(NewFlake(true));
 
         var menu = new ContextMenuStrip();
         var snowToggle = new ToolStripMenuItem("Снег: включён") { CheckOnClick = true, Checked = true };
@@ -73,6 +88,7 @@ internal sealed class ChristmasOverlay : Form
         tray.ContextMenuStrip = menu;
         tray.Visible = true;
 
+        Shown += (_, _) => KeepBehindTaskbar();
         animation.Tick += (_, _) => TickAnimation();
         animation.Start();
         FormClosed += (_, _) =>
@@ -93,30 +109,61 @@ internal sealed class ChristmasOverlay : Form
         }
     }
 
+    // Keep the overlay above ordinary windows but immediately behind the Windows taskbar.
+    private void KeepBehindTaskbar()
+    {
+        IntPtr taskbar = FindWindow("Shell_TrayWnd", null);
+        if (taskbar != IntPtr.Zero)
+            SetWindowPos(Handle, taskbar, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+    }
+
     private Flake NewFlake(bool anywhere) => new()
     {
         X = random.Next(Math.Max(1, Width)),
-        Y = anywhere ? random.Next(Math.Max(1, Height)) : -10,
-        Size = (float)(1.5 + random.NextDouble() * 4.2),
-        Speed = (float)(0.8 + random.NextDouble() * 2.5),
-        Drift = (float)(-0.55 + random.NextDouble() * 1.1),
-        Opacity = (float)(0.45 + random.NextDouble() * 0.5)
+        Y = anywhere ? random.Next(Math.Max(1, Height)) : -8,
+        Size = (float)(0.9 + random.NextDouble() * 2.0),
+        Speed = (float)(0.65 + random.NextDouble() * 1.65),
+        Drift = (float)(-0.38 + random.NextDouble() * 0.76),
+        Opacity = (float)(0.78 + random.NextDouble() * 0.22)
     };
 
     private void TickAnimation()
     {
         phase += 0.055f;
+
         if (showSnow)
         {
+            Point cursor = Cursor.Position;
+            float cursorX = cursor.X - Bounds.Left;
+            float cursorY = cursor.Y - Bounds.Top;
+
             foreach (var f in snow)
             {
                 f.Y += f.Speed;
-                f.X += f.Drift + (float)Math.Sin(phase + f.Y / 70f) * 0.35f;
-                if (f.Y > Height + 12) { f.Y = -12; f.X = random.Next(Math.Max(1, Width)); }
-                if (f.X < -10) f.X = Width + 10;
-                if (f.X > Width + 10) f.X = -10;
+                f.X += f.Drift + (float)Math.Sin(phase + f.Y / 70f) * 0.22f;
+
+                // Soft invisible force field around the mouse pointer.
+                float dx = f.X - cursorX;
+                float dy = f.Y - cursorY;
+                float distanceSquared = dx * dx + dy * dy;
+                float radiusSquared = CursorRepelRadius * CursorRepelRadius;
+
+                if (distanceSquared < radiusSquared && distanceSquared > 0.01f)
+                {
+                    float distance = (float)Math.Sqrt(distanceSquared);
+                    float falloff = 1f - distance / CursorRepelRadius;
+                    float push = 3.2f * falloff * falloff;
+                    f.X += dx / distance * push;
+                    f.Y += dy / distance * push;
+                }
+
+                if (f.Y > Height + 8) { f.Y = -8; f.X = random.Next(Math.Max(1, Width)); }
+                if (f.X < -8) f.X = Width + 8;
+                if (f.X > Width + 8) f.X = -8;
             }
         }
+
         Invalidate();
     }
 
@@ -125,76 +172,97 @@ internal sealed class ChristmasOverlay : Form
         base.OnPaint(e);
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
-        if (showLights) DrawGarland(g, true, 42);
-        if (showLights) DrawGarland(g, false, 34);
+        if (showLights)
+        {
+            DrawGarland(g, top: true);
+            DrawGarland(g, top: false);
+        }
 
         if (showSnow)
         {
             foreach (var f in snow)
             {
-                using var brush = new SolidBrush(Color.FromArgb((int)(255 * f.Opacity), 255, 255, 255));
+                using var brush = new SolidBrush(Color.FromArgb((int)(245 * f.Opacity), 255, 255, 255));
                 g.FillEllipse(brush, f.X, f.Y, f.Size, f.Size);
-                if (f.Size > 4.4f)
-                {
-                    using var glow = new SolidBrush(Color.FromArgb(28, 255, 255, 255));
-                    g.FillEllipse(glow, f.X - 3, f.Y - 3, f.Size + 6, f.Size + 6);
-                }
             }
         }
     }
 
-    private void DrawGarland(Graphics g, bool top, int depth)
+    private void DrawGarland(Graphics g, bool top)
     {
         int width = Width;
-        float baseY = top ? 1 : Height - 1;
-        using var wire = new Pen(Color.FromArgb(225, 28, 75, 42), 3);
-        using var wireHi = new Pen(Color.FromArgb(130, 130, 170, 105), 1);
-        using var branch = new Pen(Color.FromArgb(220, 24, 91, 48), 5);
-        using var branchHi = new Pen(Color.FromArgb(150, 56, 125, 67), 2);
+        // The lower strand is tucked into the top edge of the taskbar. The shell taskbar
+        // sits above this window, hiding the cable and the lower half of the greenery.
+        float baseY = top ? 0f : Height - 44f;
+        float depth = top ? 19f : 15f;
+        int segments = Math.Max(16, width / 34);
 
-        var path = new GraphicsPath();
-        int segments = Math.Max(12, width / 45);
         PointF PointAt(int i)
         {
             float x = width * i / (float)segments;
             float sag = (float)Math.Sin(i * Math.PI / segments) * depth;
-            float wave = (float)Math.Sin(i * Math.PI * 2 / 5.2 + phase * 0.18) * 4;
-            return new PointF(x, baseY + (top ? sag + wave : -sag - wave));
+            return new PointF(x, baseY + (top ? sag : -sag));
         }
-        path.AddLines(Enumerable.Range(0, segments + 1).Select(PointAt).ToArray());
-        g.DrawPath(wire, path);
-        g.DrawPath(wireHi, path);
 
-        for (int x = 8; x < width; x += 24)
+        using var cable = new Pen(Color.FromArgb(205, 42, 54, 35), top ? 1.3f : 1.7f);
+        using var cableHighlight = new Pen(Color.FromArgb(105, 154, 145, 104), 0.65f);
+        using var needlesDark = new Pen(Color.FromArgb(225, 19, 72, 39), top ? 2.2f : 3.1f);
+        using var needlesMid = new Pen(Color.FromArgb(220, 34, 105, 53), top ? 1.8f : 2.5f);
+        using var needlesLight = new Pen(Color.FromArgb(155, 73, 133, 69), 1.0f);
+
+        using var path = new GraphicsPath();
+        path.AddLines(Enumerable.Range(0, segments + 1).Select(PointAt).ToArray());
+        g.DrawPath(cable, path);
+        g.DrawPath(cableHighlight, path);
+
+        // Short overlapping fir sprigs, angled down from the wire for a more natural silhouette.
+        int spacing = top ? 13 : 10;
+        for (int x = 3; x < width; x += spacing)
         {
-            float sag = (float)Math.Sin(x / (float)Math.Max(1, width) * Math.PI) * depth;
+            float t = x / (float)Math.Max(1, width);
+            float sag = (float)Math.Sin(t * Math.PI) * depth;
             float y = baseY + (top ? sag : -sag);
+            float sway = (float)Math.Sin(x * 0.13f) * 1.7f;
+            float direction = top ? 1f : -1f;
+
             for (int side = -1; side <= 1; side++)
             {
-                float yy = y + (top ? 1 : -1) * side * 4;
-                g.DrawLine(branch, x, yy, x + 10, yy + (top ? 7 : -7));
-                g.DrawLine(branchHi, x + 2, yy + (top ? 1 : -1), x + 9, yy + (top ? 6 : -6));
+                float sx = x + side * 2.5f;
+                float sy = y + sway + side * 1.5f;
+                float ex = sx + (side == 0 ? 8 : 6) * (side < 0 ? -1 : 1);
+                float ey = sy + direction * (top ? 9 : 11);
+
+                g.DrawLine(needlesDark, sx, sy, ex, ey);
+                g.DrawLine(needlesMid, sx + 1, sy + direction * 1.5f, ex - 1, ey - direction);
+                g.DrawLine(needlesLight, sx + 1, sy + direction * 2.5f, ex - 2, ey - direction * 2);
             }
         }
 
-        Color[] colors = { Color.OrangeRed, Color.Gold, Color.DeepSkyBlue, Color.LimeGreen, Color.HotPink, Color.White };
+        // Small, warm bulbs spaced farther apart on the slimmer upper strand.
+        Color[] colors = { Color.FromArgb(255, 224, 112, 82), Color.FromArgb(255, 245, 207, 111),
+            Color.FromArgb(255, 131, 190, 218), Color.FromArgb(255, 159, 202, 132) };
+        int bulbSpacing = top ? 92 : 76;
         int index = 0;
-        for (int x = 14; x < width; x += 38, index++)
+        for (int x = top ? 42 : 28; x < width; x += bulbSpacing, index++)
         {
-            float sag = (float)Math.Sin(x / (float)Math.Max(1, width) * Math.PI) * depth;
+            float t = x / (float)Math.Max(1, width);
+            float sag = (float)Math.Sin(t * Math.PI) * depth;
             float y = baseY + (top ? sag : -sag);
-            float drop = top ? 13 + index % 3 * 2 : -13 - index % 3 * 2;
-            float pulse = 0.72f + 0.28f * (float)Math.Sin(phase * 2.2f + index * 0.8f);
+            float drop = top ? 7f : -7f;
+            float pulse = 0.82f + 0.18f * (float)Math.Sin(phase * 1.8f + index * 1.13f);
             Color color = colors[index % colors.Length];
-            using var glow = new SolidBrush(Color.FromArgb((int)(55 * pulse), color));
-            using var bulb = new SolidBrush(Color.FromArgb((int)(235 * pulse), color));
-            using var cap = new SolidBrush(Color.FromArgb(220, 65, 65, 65));
-            float bx = x, by = y + drop;
-            g.FillEllipse(glow, bx - 8, by - 8, 16, 16);
-            g.FillRectangle(cap, bx - 1.5f, by - (top ? 5 : -1), 3, 4);
-            g.FillEllipse(bulb, bx - 3.2f, by - 3.2f, 6.4f, 6.4f);
+            float radius = top ? 2.25f : 2.8f;
+
+            using var glow = new SolidBrush(Color.FromArgb((int)(34 * pulse), color));
+            using var bulb = new SolidBrush(Color.FromArgb((int)(225 * pulse), color));
+            using var socket = new SolidBrush(Color.FromArgb(210, 58, 62, 47));
+            float bx = x;
+            float by = y + drop;
+            g.FillEllipse(glow, bx - radius * 2.5f, by - radius * 2.5f, radius * 5f, radius * 5f);
+            g.FillRectangle(socket, bx - 1f, by - (top ? 4f : -1f), 2f, 3f);
+            g.FillEllipse(bulb, bx - radius, by - radius, radius * 2f, radius * 2f);
         }
-        path.Dispose();
     }
 }

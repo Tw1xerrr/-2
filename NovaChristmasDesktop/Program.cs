@@ -43,7 +43,7 @@ internal sealed class ChristmasOverlay : Form
     private bool showLights = true;
     private float phase;
 
-    private const float CursorRepelRadius = 112f;
+    private const float CursorRepelRadius = 195f;
 
     private sealed class Flake
     {
@@ -153,7 +153,7 @@ internal sealed class ChristmasOverlay : Form
                 {
                     float distance = (float)Math.Sqrt(distanceSquared);
                     float falloff = 1f - distance / CursorRepelRadius;
-                    float push = 3.2f * falloff * falloff;
+                    float push = 4.6f * falloff * falloff;
                     f.X += dx / distance * push;
                     f.Y += dy / distance * push;
                 }
@@ -182,11 +182,20 @@ internal sealed class ChristmasOverlay : Form
 
         if (showSnow)
         {
+            // Draw snow as solid pure-white pixels without magenta anti-aliased fringes.
+            // The magenta transparency key can otherwise tint the partially covered edge pixels.
+            var oldSmoothing = g.SmoothingMode;
+            var oldPixelOffset = g.PixelOffsetMode;
+            g.SmoothingMode = SmoothingMode.None;
+            g.PixelOffsetMode = PixelOffsetMode.None;
+            using var snowBrush = new SolidBrush(Color.White);
             foreach (var f in snow)
             {
-                using var brush = new SolidBrush(Color.FromArgb((int)(245 * f.Opacity), 255, 255, 255));
-                g.FillEllipse(brush, f.X, f.Y, f.Size, f.Size);
+                float size = Math.Max(1.5f, f.Size);
+                g.FillEllipse(snowBrush, (float)Math.Round(f.X), (float)Math.Round(f.Y), size, size);
             }
+            g.SmoothingMode = oldSmoothing;
+            g.PixelOffsetMode = oldPixelOffset;
         }
     }
 

@@ -22,7 +22,7 @@ internal sealed class ChristmasOverlay : Form
     private const int WS_EX_TOOLWINDOW = 0x80;
     private const int WS_EX_LAYERED = 0x80000;
 
-    private readonly Timer animation = new() { Interval = 30 };
+    private readonly System.Windows.Forms.Timer animation = new() { Interval = 30 };
     private readonly Random random = new();
     private readonly List<Flake> snow = new();
     private readonly NotifyIcon tray = new();

@@ -61,7 +61,7 @@ internal sealed class ChristmasOverlay : Form
         TransparencyKey = Color.Magenta;
         DoubleBuffered = true;
 
-        for (int i = 0; i < 165; i++) snow.Add(NewFlake(true));
+        for (int i = 0; i < 280; i++) snow.Add(NewFlake(true));
 
         var menu = new ContextMenuStrip();
         var snowToggle = new ToolStripMenuItem("Снег: включён") { CheckOnClick = true, Checked = true };
